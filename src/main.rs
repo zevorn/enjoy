@@ -1,5 +1,7 @@
 use clap::Parser;
 use std::num::ParseIntError;
+use std::process::Command;
+use std::process::Stdio;
 
 /// 自定义数值解析函数（支持十进制、十六进制、二进制）
 fn parse_number(s: &str) -> Result<i64, ParseIntError> {
@@ -138,11 +140,13 @@ struct Args {
         long,
         num_args = 1.., // 接收至少一个参数
         value_parser = parse_expression_token,
-        required = true // 确保必须提供 --calc 参数
     )]
     calc: Vec<ExprToken>, // 使用 Vec 存储解析后的表达式
-}
 
+    /// 是否启用 Gerrit 功能 (--gerrit)
+    #[arg(short, long, default_value_t = false)]
+    gerrit: bool,
+}
 
 fn get_padded_binary(num: i64) -> String {
     let binary_str = format!("{:b}", num);
@@ -163,18 +167,20 @@ fn print_binary_info(num: i64) {
     let padded_binary = get_padded_binary(num);
     let groups = split_into_groups(&padded_binary);
     let first_line = groups.join(" ");
-    
+
     // 生成位索引
-    let bit_positions: Vec<i32> = groups.iter()
+    let bit_positions: Vec<i64> = groups
+        .iter()
         .enumerate()
-        .map(|(i, _)| (padded_binary.len() as i32 - 4) - (i as i32 * 4))
+        .map(|(i, _)| (padded_binary.len() as i64 - 4) - (i as i64 * 4))
         .collect();
 
-    let second_line = bit_positions.iter()
+    let second_line = bit_positions
+        .iter()
         .map(|&x| format!("{:4}", x))
         .collect::<Vec<_>>()
         .join(" ");
-    
+
     println!("二进制: ");
     println!("{}", first_line);
     println!("{}", second_line);
@@ -183,12 +189,36 @@ fn print_binary_info(num: i64) {
 fn main() {
     let args: Args = Args::parse();
 
-    match evaluate_expression(&args.calc) {
-        Ok(result) => {
-            println!("十进制: {}", result);
-            println!("十六进制: 0x{:X}", result);
-            print_binary_info(result);
+    if !args.calc.is_empty() {
+        match evaluate_expression(&args.calc) {
+            Ok(result) => {
+                println!("十进制: {}", result);
+                println!("十六进制: 0x{:X}", result);
+                print_binary_info(result);
+            }
+            Err(err) => println!("错误: {}", err),
         }
-        Err(err) => println!("错误: {}", err),
+    }
+
+    // 如果启用了 --gerrit 参数，执行 Git 命令
+    if args.gerrit {
+        let cmd = "git push origin HEAD:refs/for/develop%r=zhaoqz";
+        println!("{}", cmd);
+
+        // 使用 spawn 和 Stdio::inherit 实现实时输出
+        let mut child = Command::new("bash")
+            .arg("-c")
+            .arg(cmd)
+            .stdout(Stdio::inherit()) // 实时输出到终端
+            .stderr(Stdio::inherit()) // 实时输出错误信息到终端
+            .spawn()
+            .expect("无法启动 Git 命令");
+
+        // 等待命令完成
+        let status = child.wait().expect("无法等待 Git 命令完成");
+
+        if !status.success() {
+            eprintln!("Git 命令执行失败");
+        }
     }
 }
